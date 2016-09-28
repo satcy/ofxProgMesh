@@ -69,7 +69,7 @@ public:
     
     
     void stop() {
-        stopThread();
+        waitForThread(false, 1);
     }
     
     void threadedFunction() {
