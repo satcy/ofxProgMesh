@@ -25,19 +25,28 @@ protected:
     string filepath;
     
     float target_percent;
-    mutable ofMesh * target;
+    ofMesh target;
+    
+    ofThreadChannel<float> toProgress;
+    ofThreadChannel<ofMesh> fromProgress;
+    
+    bool newFrame;
     
 public:
-    
     ProgThread(){
-        target_percent = 100.0;
+        setProgress(100.0);
+        
+        startThread();
+    }
+    
+    ~ProgThread(){
+        toProgress.close();
+        fromProgress.close();
+        stopThread();
     }
     
     void loadPLY(string path){
         filepath = path;
-        if ( isThreadRunning() ) {
-            stop();
-        }
         
         delete g_pProgMesh;
         g_pProgMesh = NULL;
@@ -56,48 +65,42 @@ public:
         g_pProgMesh = new Prog(&g_pMesh, Prog::QUADRICTRI );
     }
     
-    void setTargetMesh(ofMesh & _target){
-        target = &_target;
+    void update(ofMesh & mesh){
+        newFrame = false;
+        while(fromProgress.tryReceive(target)){
+            newFrame = true;
+        }
+        if ( newFrame ) {
+            mesh = target;
+        }
     }
     
     void setProgress(float percent) {
-        if ( target_percent == percent ) return;
-        target_percent = percent;
-        if ( isThreadRunning() ) return;
-        startThread();
+        if ( toProgress.empty() ) toProgress.send(percent);
     }
     
-    
     void stop() {
-        waitForThread(false, 1);
+        stopThread();
     }
     
     void threadedFunction() {
-        if(lock()) {
-            
+        while(toProgress.receive(target_percent)){
             if ( g_pProgMesh == NULL ) {
                 g_pMesh.load(filepath);
                 g_pMesh.Normalize();
                 
                 g_pProgMesh = new Prog(&g_pMesh, Prog::QUADRICTRI );
-            }
-            
-            if (g_pProgMesh) {
-                //cout << g_pProgMesh->numVisTris() << endl;
-                g_pProgMesh->setProgress(target_percent);
                 
-                if ( target ) {
-                    ofVboMesh mesh;
-                    g_pProgMesh->readToMesh(mesh);
-                    target->clear();
-                    target->append(mesh);
-                    //target->mergeDuplicateVertices();
-                }
+                cout << "ProgThread: " << g_pProgMesh->numVisTris() << endl;
             }
-            
-            unlock();
-            
-            stop();
+            if (g_pProgMesh) {
+                g_pProgMesh->setProgress(target_percent);
+                //if ( target ) {
+                    ofMesh mesh;
+                    g_pProgMesh->readToMesh(mesh);
+                    if (fromProgress.empty() ) fromProgress.send(mesh);
+                //}
+            }
         }
     }
     
